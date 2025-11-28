@@ -1,4 +1,4 @@
-const chromium = require('@sparticuz/chromium');
+const chromium = require('@sparticuz/chromium-min');
 const puppeteer = require('puppeteer-core');
 const path = require('path');
 const fs = require('fs');
@@ -68,10 +68,11 @@ module.exports = async (req, res) => {
 
         // 3. Launch Browser
         browser = await puppeteer.launch({
-            args: chromium.args,
+            args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
             defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(),
+            executablePath: await chromium.executablePath('https://github.com/Sparticuz/chromium/releases/download/v123.0.0/chromium-v123.0.0-pack.tar'),
             headless: chromium.headless,
+            ignoreHTTPSErrors: true,
         });
 
         const page = await browser.newPage();
