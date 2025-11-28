@@ -1,3 +1,3 @@
 module.exports = (req, res) => {
-    res.send('SheerID Verification API is Running! 🚀\n\nGo to /api/admin for the dashboard.');
+    res.send('<h1>SheerID Verification API is Running! 🚀</h1><p>Go to <a href="/api/admin">/api/admin</a> for the dashboard.</p>');
 };
