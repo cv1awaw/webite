@@ -6,8 +6,16 @@
             "dest": "/api/index.js"
         },
         {
+            "src": "/api/verify",
+            "dest": "/api/verify.js"
+        },
+        {
             "src": "/api/admin",
             "dest": "/api/admin.js"
+        },
+        {
+            "src": "/api/trace",
+            "dest": "/api/trace.js"
         }
     ]
 }
