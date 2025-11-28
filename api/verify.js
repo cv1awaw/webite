@@ -45,17 +45,24 @@ module.exports = async (req, res) => {
         url: url,
         generatedName: 'Pending',
         status: 'Pending',
+        steps: [], // Breadcrumbs
         errorDetails: null
     };
 
+    const addStep = (msg) => {
+        console.log(msg);
+        logEntry.steps.push(`${new Date().toISOString().split('T')[1].slice(0, 8)} - ${msg}`);
+    };
+
     try {
-        console.log('Starting verification for:', email);
+        addStep('Starting verification...');
 
         // 1. Generate Data
         const data = generateRandomData();
         const fullName = `${data.firstName} ${data.lastName}`;
         logEntry.generatedName = fullName;
         logEntry.generatedData = data;
+        addStep(`Generated Data: ${fullName}`);
 
         // 2. Generate PDF
         const pdfBuffer = await generatePDF({
@@ -68,9 +75,10 @@ module.exports = async (req, res) => {
 
         const pdfPath = '/tmp/EarningsStatement.pdf';
         fs.writeFileSync(pdfPath, pdfBuffer);
+        addStep('PDF Generated and Saved');
 
-        // 3. Launch Browser (Latest Sparticuz Config)
-        // IMPORTANT: Vercel requires specific args to avoid crashing
+        // 3. Launch Browser (v119 Config)
+        addStep('Launching Browser...');
         browser = await puppeteer.launch({
             args: chromium.args,
             defaultViewport: chromium.defaultViewport,
@@ -78,15 +86,17 @@ module.exports = async (req, res) => {
             headless: chromium.headless,
             ignoreHTTPSErrors: true,
         });
+        addStep('Browser Launched Successfully');
 
         const page = await browser.newPage();
 
         // 4. Navigate
-        console.log('Navigating...');
+        addStep(`Navigating to URL: ${url}`);
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+        addStep('Page Loaded');
 
         // 5. Fill Form
-        console.log('Filling form...');
+        addStep('Filling Form...');
         try {
             const schoolInput = await page.waitForSelector('input[aria-label="School name"]', { timeout: 10000 });
             if (schoolInput) {
@@ -94,15 +104,17 @@ module.exports = async (req, res) => {
                 await page.waitForTimeout(2000);
                 await page.keyboard.press('ArrowDown');
                 await page.keyboard.press('Enter');
+                addStep('School Name Filled');
             }
         } catch (e) {
-            console.log('School input skipped/failed:', e.message);
+            addStep(`School Input Warning: ${e.message}`);
         }
 
         await page.waitForSelector('input[name="firstName"]');
         await page.type('input[name="firstName"]', data.firstName);
         await page.type('input[name="lastName"]', data.lastName);
         await page.type('input[name="email"]', email);
+        addStep('Personal Info Filled');
 
         screenshots.form_filled = await page.screenshot({ encoding: 'base64' });
 
@@ -110,26 +122,31 @@ module.exports = async (req, res) => {
         const [button] = await page.$x("//button[contains(., 'Verify My Educator Status')]");
         if (button) {
             await button.click();
+            addStep('Verify Button Clicked');
         } else {
             throw new Error('Verify button not found');
         }
 
         // Upload
+        addStep('Waiting for Upload Page...');
         await page.waitForSelector('input[type="file"]', { timeout: 30000 });
         screenshots.upload_page = await page.screenshot({ encoding: 'base64' });
 
         const inputUploadHandle = await page.$('input[type="file"]');
         await inputUploadHandle.uploadFile(pdfPath);
+        addStep('PDF Uploaded');
 
         await page.waitForTimeout(3000);
         const [submitButton] = await page.$x("//button[contains(., 'Submit') or contains(., 'Upload')]");
         if (submitButton) {
             await submitButton.click();
+            addStep('Submit Button Clicked');
         }
 
         // Success
         await page.waitForTimeout(5000);
         screenshots.final_result = await page.screenshot({ encoding: 'base64' });
+        addStep('Verification Completed');
 
         await browser.close();
 
@@ -145,6 +162,7 @@ module.exports = async (req, res) => {
 
     } catch (error) {
         console.error('Verification Error:', error);
+        addStep(`ERROR: ${error.message}`);
 
         if (browser) {
             try {
@@ -157,7 +175,7 @@ module.exports = async (req, res) => {
         }
 
         logEntry.status = 'Failed';
-        logEntry.errorDetails = error.stack || error.message; // Store full stack trace
+        logEntry.errorDetails = error.stack || error.message;
         global.adminLogs.unshift(logEntry);
 
         res.status(500).json({
