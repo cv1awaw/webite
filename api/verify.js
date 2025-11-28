@@ -1,25 +1,21 @@
-const chromium = require('@sparticuz/chromium');
+const chromium = require('chrome-aws-lambda');
 const puppeteer = require('puppeteer-core');
-const path = require('path');
 const fs = require('fs');
 const { generatePDF } = require('../utils/pdfGenerator');
 
-// In-memory log storage
+// Global Log Storage
 global.adminLogs = global.adminLogs || [];
 
+// --- UTILS ---
 function getRandomElement(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
 function generateRandomData() {
-    const firstNames = ['James', 'John', 'Robert', 'Michael', 'William', 'David', 'Richard', 'Joseph', 'Thomas', 'Charles'];
-    const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'];
-    const departments = ['Mathematics Department', 'Science Department', 'History Department', 'English Department', 'Physics Department', 'Chemistry Department'];
-
     return {
-        firstName: getRandomElement(firstNames),
-        lastName: getRandomElement(lastNames),
-        department: getRandomElement(departments),
+        firstName: getRandomElement(['James', 'John', 'Robert', 'Michael', 'William', 'David', 'Richard', 'Joseph', 'Thomas', 'Charles']),
+        lastName: getRandomElement(['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez']),
+        department: getRandomElement(['Mathematics', 'Science', 'History', 'English', 'Physics', 'Chemistry']) + ' Department',
         employeeId: Math.floor(100000 + Math.random() * 900000).toString(),
         payPeriod: '2025-09-01 – 2025-11-30',
         payDate: '2025-11-30'
@@ -27,44 +23,41 @@ function generateRandomData() {
 }
 
 module.exports = async (req, res) => {
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method Not Allowed' });
-    }
-
+    // 1. Validation
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
     const { url, email } = req.body;
+    if (!url || !email) return res.status(400).json({ error: 'Missing URL or Email' });
 
-    if (!url || !email) {
-        return res.status(400).json({ error: 'Missing URL or Email' });
-    }
-
-    let browser = null;
-    const screenshots = {};
+    // 2. Init Log Entry
     const logEntry = {
         timestamp: new Date().toISOString(),
         email: email,
         url: url,
         generatedName: 'Pending',
         status: 'Pending',
-        steps: [], // Breadcrumbs
+        steps: [],
         errorDetails: null
     };
 
     const addStep = (msg) => {
-        console.log(msg);
+        console.log(`[${email}] ${msg}`);
         logEntry.steps.push(`${new Date().toISOString().split('T')[1].slice(0, 8)} - ${msg}`);
     };
 
-    try {
-        addStep('Starting verification...');
+    let browser = null;
+    const screenshots = {};
 
-        // 1. Generate Data
+    try {
+        addStep('🚀 Starting Verification Process V2');
+
+        // 3. Generate Data
         const data = generateRandomData();
         const fullName = `${data.firstName} ${data.lastName}`;
         logEntry.generatedName = fullName;
         logEntry.generatedData = data;
-        addStep(`Generated Data: ${fullName}`);
+        addStep(`Generated Identity: ${fullName} (${data.department})`);
 
-        // 2. Generate PDF
+        // 4. Generate PDF
         const pdfBuffer = await generatePDF({
             name: fullName,
             employeeId: data.employeeId,
@@ -72,17 +65,16 @@ module.exports = async (req, res) => {
             payPeriod: data.payPeriod,
             payDate: data.payDate
         });
-
         const pdfPath = '/tmp/EarningsStatement.pdf';
         fs.writeFileSync(pdfPath, pdfBuffer);
-        addStep('PDF Generated and Saved');
+        addStep('📄 PDF Document Created');
 
-        // 3. Launch Browser (v119 Config)
-        addStep('Launching Browser...');
-        browser = await puppeteer.launch({
-            args: chromium.args,
+        // 5. Launch Browser (Golden Pair Config)
+        addStep('🌐 Launching Chrome (AWS Lambda Mode)...');
+        browser = await chromium.puppeteer.launch({
+            args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
             defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath(),
+            executablePath: await chromium.executablePath,
             headless: chromium.headless,
             ignoreHTTPSErrors: true,
         });
@@ -90,98 +82,88 @@ module.exports = async (req, res) => {
 
         const page = await browser.newPage();
 
-        // 4. Navigate
-        addStep(`Navigating to URL: ${url}`);
+        // 6. Navigation
+        addStep(`Navigating to: ${url}`);
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
         addStep('Page Loaded');
 
-        // 5. Fill Form
-        addStep('Filling Form...');
+        // 7. Form Filling
+        addStep('✍️ Filling Form Data...');
+
+        // School Logic
         try {
-            const schoolInput = await page.waitForSelector('input[aria-label="School name"]', { timeout: 10000 });
+            const schoolInput = await page.waitForSelector('input[aria-label="School name"]', { timeout: 5000 });
             if (schoolInput) {
                 await schoolInput.type('South Garland High School');
-                await page.waitForTimeout(2000);
+                await page.waitForTimeout(1500);
                 await page.keyboard.press('ArrowDown');
                 await page.keyboard.press('Enter');
-                addStep('School Name Filled');
+                addStep('School Selected');
             }
         } catch (e) {
-            addStep(`School Input Warning: ${e.message}`);
+            addStep('Note: School input skipped (might be pre-filled)');
         }
 
-        await page.waitForSelector('input[name="firstName"]');
         await page.type('input[name="firstName"]', data.firstName);
         await page.type('input[name="lastName"]', data.lastName);
         await page.type('input[name="email"]', email);
-        addStep('Personal Info Filled');
+        addStep('Personal Info Entered');
 
         screenshots.form_filled = await page.screenshot({ encoding: 'base64' });
 
-        // Click Verify
-        const [button] = await page.$x("//button[contains(., 'Verify My Educator Status')]");
-        if (button) {
-            await button.click();
-            addStep('Verify Button Clicked');
-        } else {
-            throw new Error('Verify button not found');
-        }
+        // 8. Verify Button
+        const [verifyBtn] = await page.$x("//button[contains(., 'Verify My Educator Status')]");
+        if (!verifyBtn) throw new Error('Verify button not found');
+        await verifyBtn.click();
+        addStep('Verify Button Clicked');
 
-        // Upload
-        addStep('Waiting for Upload Page...');
+        // 9. Upload
+        addStep('Waiting for Upload Screen...');
         await page.waitForSelector('input[type="file"]', { timeout: 30000 });
         screenshots.upload_page = await page.screenshot({ encoding: 'base64' });
 
-        const inputUploadHandle = await page.$('input[type="file"]');
-        await inputUploadHandle.uploadFile(pdfPath);
-        addStep('PDF Uploaded');
+        const uploader = await page.$('input[type="file"]');
+        await uploader.uploadFile(pdfPath);
+        addStep('📤 PDF Uploaded');
 
-        await page.waitForTimeout(3000);
-        const [submitButton] = await page.$x("//button[contains(., 'Submit') or contains(., 'Upload')]");
-        if (submitButton) {
-            await submitButton.click();
+        await page.waitForTimeout(2000);
+        const [submitBtn] = await page.$x("//button[contains(., 'Submit') or contains(., 'Upload')]");
+        if (submitBtn) {
+            await submitBtn.click();
             addStep('Submit Button Clicked');
         }
 
-        // Success
+        // 10. Success
+        addStep('Waiting for Final Result...');
         await page.waitForTimeout(5000);
         screenshots.final_result = await page.screenshot({ encoding: 'base64' });
-        addStep('Verification Completed');
+        addStep('✅ Verification Sequence Complete');
 
         await browser.close();
 
+        // Finalize Log
         logEntry.status = 'Success';
         global.adminLogs.unshift(logEntry);
         if (global.adminLogs.length > 50) global.adminLogs.pop();
 
-        res.status(200).json({
-            success: true,
-            screenshots: screenshots,
-            data: data
-        });
+        res.status(200).json({ success: true, screenshots, data });
 
     } catch (error) {
-        console.error('Verification Error:', error);
-        addStep(`ERROR: ${error.message}`);
+        console.error('V2 Error:', error);
+        addStep(`❌ FATAL ERROR: ${error.message}`);
 
         if (browser) {
             try {
                 const pages = await browser.pages();
-                if (pages.length > 0) {
-                    screenshots.error = await pages[0].screenshot({ encoding: 'base64' });
-                }
+                if (pages.length > 0) screenshots.error = await pages[0].screenshot({ encoding: 'base64' });
             } catch (e) { }
             await browser.close();
         }
 
         logEntry.status = 'Failed';
-        logEntry.errorDetails = error.stack || error.message;
+        logEntry.errorDetails = error.stack;
         global.adminLogs.unshift(logEntry);
 
-        res.status(500).json({
-            success: false,
-            error: error.message,
-            screenshots: screenshots
-        });
+        res.status(500).json({ success: false, error: error.message, screenshots });
     }
 };
