@@ -54,11 +54,14 @@ module.exports = (req, res) => {
                 <th>Generated Name</th>
                 <th>Department</th>
                 <th>Status</th>
+                <th>Error Details</th>
             </tr>
     `;
 
     logs.forEach(log => {
         const statusClass = log.status === 'Success' ? 'success' : 'failed';
+        const errorDetails = log.errorDetails ? `<details><summary>View Error</summary><pre>${log.errorDetails}</pre></details>` : '-';
+
         html += `
             <tr>
                 <td>${log.timestamp}</td>
@@ -66,6 +69,7 @@ module.exports = (req, res) => {
                 <td>${log.generatedName}</td>
                 <td>${log.generatedData ? log.generatedData.department : '-'}</td>
                 <td class="${statusClass}">${log.status}</td>
+                <td>${errorDetails}</td>
             </tr>
         `;
     });
