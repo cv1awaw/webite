@@ -1,5 +1,9 @@
-            "src": "/api/verify",
-            "dest": "/api/verify.js"
+{
+    "version": 2,
+    "routes": [
+        {
+            "src": "/",
+            "dest": "/api/index.js"
         },
         {
             "src": "/api/admin",
