@@ -1,6 +1,6 @@
 module.exports = (req, res) => {
-    const { key } = req.query;
-    const secretKey = 'admin123'; // Change this to a strong secret
+    const { key, action } = req.query;
+    const secretKey = 'admin123';
 
     // If no key or wrong key, show Login Page
     if (key !== secretKey) {
@@ -27,6 +27,21 @@ module.exports = (req, res) => {
             </body>
             </html>
         `);
+    }
+
+    // Handle Test Action
+    if (action === 'test') {
+        global.adminLogs = global.adminLogs || [];
+        global.adminLogs.unshift({
+            timestamp: new Date().toISOString(),
+            email: 'test@example.com',
+            generatedName: 'Test User',
+            generatedData: { department: 'IT Test' },
+            status: 'Success',
+            steps: ['Manual Test Triggered', 'System is operational'],
+            errorDetails: null
+        });
+        return res.redirect(`/api/admin?key=${key}`);
     }
 
     const logs = global.adminLogs || [];
