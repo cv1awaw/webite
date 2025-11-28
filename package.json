@@ -4,8 +4,8 @@
     "description": "Vercel function for SheerID automation",
     "main": "api/verify.js",
     "dependencies": {
-        "puppeteer-core": "^22.6.0",
-        "@sparticuz/chromium-min": "^123.0.0",
+        "puppeteer-core": "^21.5.0",
+        "@sparticuz/chromium": "^119.0.0",
         "pdfkit": "^0.14.0"
     }
 }

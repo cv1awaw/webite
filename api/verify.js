@@ -1,11 +1,10 @@
-const chromium = require('@sparticuz/chromium-min');
+const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
 const path = require('path');
 const fs = require('fs');
 const { generatePDF } = require('../utils/pdfGenerator');
 
-// In-memory log storage (Note: Resets on Vercel cold start, but good enough for demo)
-// For production, use a database (MongoDB/Postgres)
+// In-memory log storage
 global.adminLogs = global.adminLogs || [];
 
 function getRandomElement(arr) {
@@ -21,7 +20,7 @@ function generateRandomData() {
         firstName: getRandomElement(firstNames),
         lastName: getRandomElement(lastNames),
         department: getRandomElement(departments),
-        employeeId: Math.floor(100000 + Math.random() * 900000).toString(), // 6 digits
+        employeeId: Math.floor(100000 + Math.random() * 900000).toString(),
         payPeriod: '2025-09-01 – 2025-11-30',
         payDate: '2025-11-30'
     };
@@ -39,6 +38,7 @@ module.exports = async (req, res) => {
     }
 
     let browser = null;
+    const screenshots = {}; // Store multiple screenshots
     const logEntry = {
         timestamp: new Date().toISOString(),
         email: email,
@@ -48,6 +48,8 @@ module.exports = async (req, res) => {
     };
 
     try {
+        console.log('Starting verification for:', email);
+
         // 1. Generate Random Data
         const data = generateRandomData();
         const fullName = `${data.firstName} ${data.lastName}`;
@@ -65,12 +67,13 @@ module.exports = async (req, res) => {
 
         const pdfPath = '/tmp/EarningsStatement.pdf';
         fs.writeFileSync(pdfPath, pdfBuffer);
+        console.log('PDF generated at:', pdfPath);
 
         // 3. Launch Browser
         browser = await puppeteer.launch({
-            args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
+            args: chromium.args,
             defaultViewport: chromium.defaultViewport,
-            executablePath: await chromium.executablePath('https://github.com/Sparticuz/chromium/releases/download/v123.0.0/chromium-v123.0.0-pack.tar'),
+            executablePath: await chromium.executablePath(),
             headless: chromium.headless,
             ignoreHTTPSErrors: true,
         });
@@ -78,19 +81,27 @@ module.exports = async (req, res) => {
         const page = await browser.newPage();
 
         // 4. Navigate to URL
-        await page.goto(url, { waitUntil: 'networkidle2' });
+        console.log('Navigating to URL...');
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
 
         // 5. Fill Form
+        console.log('Filling form...');
+
         // School Name
-        const schoolInput = await page.$('input[aria-label="School name"]');
-        if (schoolInput) {
-            await schoolInput.type('South Garland High School');
-            await page.waitForTimeout(1000);
-            await page.keyboard.press('ArrowDown');
-            await page.keyboard.press('Enter');
+        try {
+            const schoolInput = await page.waitForSelector('input[aria-label="School name"]', { timeout: 10000 });
+            if (schoolInput) {
+                await schoolInput.type('South Garland High School');
+                await page.waitForTimeout(2000); // Wait for dropdown
+                await page.keyboard.press('ArrowDown');
+                await page.keyboard.press('Enter');
+            }
+        } catch (e) {
+            console.log('School input issue (might be pre-filled or different selector):', e.message);
         }
 
         // First Name
+        await page.waitForSelector('input[name="firstName"]');
         await page.type('input[name="firstName"]', data.firstName);
 
         // Last Name
@@ -99,7 +110,11 @@ module.exports = async (req, res) => {
         // Email
         await page.type('input[name="email"]', email);
 
+        // Screenshot 1: Form Filled
+        screenshots.form_filled = await page.screenshot({ encoding: 'base64' });
+
         // Click Verify Button
+        console.log('Clicking verify...');
         const [button] = await page.$x("//button[contains(., 'Verify My Educator Status')]");
         if (button) {
             await button.click();
@@ -108,41 +123,65 @@ module.exports = async (req, res) => {
         }
 
         // Wait for Upload Page
-        await page.waitForSelector('input[type="file"]', { timeout: 15000 });
+        console.log('Waiting for upload page...');
+        await page.waitForSelector('input[type="file"]', { timeout: 30000 });
+
+        // Screenshot 2: Upload Page (Before Upload)
+        screenshots.upload_page = await page.screenshot({ encoding: 'base64' });
 
         // Upload Generated PDF
+        console.log('Uploading PDF...');
         const inputUploadHandle = await page.$('input[type="file"]');
         await inputUploadHandle.uploadFile(pdfPath);
 
         // Submit Upload
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(3000); // Wait for file to be processed
         const [submitButton] = await page.$x("//button[contains(., 'Submit') or contains(., 'Upload')]");
         if (submitButton) {
             await submitButton.click();
         }
 
         // Wait for Success
+        console.log('Waiting for success...');
         await page.waitForTimeout(5000);
 
-        // Take Screenshot
-        const screenshot = await page.screenshot({ encoding: 'base64' });
+        // Screenshot 3: Final Result
+        screenshots.final_result = await page.screenshot({ encoding: 'base64' });
 
         await browser.close();
 
         // Update Log
         logEntry.status = 'Success';
         global.adminLogs.unshift(logEntry);
-        if (global.adminLogs.length > 50) global.adminLogs.pop(); // Keep last 50
+        if (global.adminLogs.length > 50) global.adminLogs.pop();
 
-        res.status(200).json({ success: true, screenshot: screenshot, data: data });
+        res.status(200).json({
+            success: true,
+            screenshots: screenshots,
+            data: data
+        });
 
     } catch (error) {
-        console.error(error);
-        if (browser) await browser.close();
+        console.error('Verification Error:', error);
+
+        // Try to take an error screenshot
+        if (browser) {
+            try {
+                const pages = await browser.pages();
+                if (pages.length > 0) {
+                    screenshots.error = await pages[0].screenshot({ encoding: 'base64' });
+                }
+            } catch (e) { console.error('Could not take error screenshot'); }
+            await browser.close();
+        }
 
         logEntry.status = 'Failed: ' + error.message;
         global.adminLogs.unshift(logEntry);
 
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            screenshots: screenshots // Return whatever screenshots we captured
+        });
     }
 };
