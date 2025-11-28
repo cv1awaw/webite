@@ -69,10 +69,10 @@ module.exports = async (req, res) => {
         fs.writeFileSync(pdfPath, pdfBuffer);
         addStep('📄 PDF Document Created');
 
-        // 5. Launch Browser
+        // 5. Launch Browser (Vercel Optimized)
         addStep('🌐 Launching Chrome...');
         browser = await puppeteer.launch({
-            args: chromium.args,
+            args: [...chromium.args, '--hide-scrollbars', '--disable-web-security', '--no-sandbox', '--disable-setuid-sandbox'],
             defaultViewport: chromium.defaultViewport,
             executablePath: await chromium.executablePath(),
             headless: chromium.headless,
